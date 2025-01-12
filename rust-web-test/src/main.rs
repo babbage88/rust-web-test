@@ -1,7 +1,7 @@
 use clap::Parser;
 use reqwest::Client;
 use colored::Colorize;
-use serde_json::Value;
+//use serde_json::Value;
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
@@ -27,7 +27,6 @@ struct Args {
 async fn send_get_request(client: &Client, id: usize, uri: String, token: String) {
     // Construct the Bearer token
     let bearer_hdr = format!("Bearer {}", token);
-    println!("Authorization Header: {}", bearer_hdr); // Debugging the token
 
     // Build the GET request
     let request = client
@@ -36,9 +35,6 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
         .header("accept", "application/json")
         .header("Authorization", &bearer_hdr)
         .build();
-
-    // Debug the request
-    println!("{:#?}", request);
 
     // Execute the request and handle the response
     match request {
@@ -50,27 +46,27 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
                 } else {
                     format!("{}", status).red().bold()
                 };
-                let response_text = match resp.text().await {
-                    Ok(text) => {
-                        // Try to parse and pretty-print the response as JSON
-                        match serde_json::from_str::<Value>(&text) {
-                            Ok(json) => serde_json::to_string_pretty(&json).unwrap_or_else(|_| text),
-                            Err(_) => text, // Fallback to plain text if not valid JSON
-                        }
-                    }
-                    Err(_) => "Failed to read response text".to_string(),
-                };
+                //let response_text = match resp.text().await {
+                //    Ok(text) => {
+                //        // Try to parse and pretty-print the response as JSON
+                //        match serde_json::from_str::<Value>(&text) {
+                //            Ok(json) => serde_json::to_string_pretty(&json).unwrap_or_else(|_| text),
+                //            Err(_) => text, // Fallback to plain text if not valid JSON
+                //        }
+                //    }
+                //    Err(_) => "Failed to read response text".to_string(),
+                //};
 
                 println!(
                     "Request {}, URL: {}, Status: {}",
-                    id,
+                    id.to_string().yellow().bold(),
                     uri.blue().bold(),
                     status_text
                 );
-                println!("Response:");
-                for line in response_text.lines() {
-                    println!("{}", line);
-                }
+                //println!("  :");
+                //for line in response_text.lines() {
+                //    println!("{}", line);
+                //}
             }
             Err(e) => {
                 eprintln!("Error in request {}: {}", id, e);
