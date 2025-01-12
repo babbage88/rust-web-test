@@ -7,20 +7,19 @@ use std::time::{Duration, Instant};
 /// Simple program to send concurrent GET requests with random parameters
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args<> {
-    /// Total number of requests to send
-    #[arg(short, long, default_value_t = 5000)]
+struct Args {
+    /// Total number of requests to send (positional)
+    #[arg(value_name = "TOTAL_REQUESTS", default_value_t = 5000)]
     total_requests: usize,
 
-    /// Number of requests to send in each batch
-    #[arg(short, long, default_value_t = 1000)]
+    /// Number of requests to send in each batch (positional)
+    #[arg(value_name = "BATCH_SIZE", default_value_t = 1000)]
     batch_size: usize,
 
-    #[arg(short, long, default_value_t)]
-    reqUri: String,
-   
+    /// Target URL to send requests to
+    #[arg(value_name = "URL")]
+    url: String,
 }
-
 // Function to generate a random float between `min` and `max`
 fn random_float(min: f64, max: f64) -> f64 {
     let mut rng = rand::thread_rng();
@@ -118,7 +117,7 @@ async fn main() {
     
 
     // Execute the request sending process
-    send_concurrent_requests(args.total_requests, args.batch_size, args.reqUri, auth_token).await;
+    send_concurrent_requests(args.total_requests, args.batch_size, args.url, auth_token).await;
 
     // Measure total elapsed time and print it
     let duration = start.elapsed();
