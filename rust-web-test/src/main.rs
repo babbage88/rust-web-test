@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::fs;
 use reqwest::Client;
 use std::time::{Duration, Instant};
 
@@ -9,6 +8,10 @@ struct Args {
     /// Target URL to send requests to (required positional argument)
     #[arg(value_name = "URL")]
     url: String,
+
+    /// Bearer Auth token for protected routes
+    #[arg(value_name = "TOKEN")]
+    token: String,
 
     /// Total number of requests to send (optional positional argument with default)
     #[arg(value_name = "TOTAL_REQUESTS", default_value_t = 5000)]
@@ -20,35 +23,43 @@ struct Args {
 }
 
 async fn send_get_request(client: &Client, id: usize, uri: String, token: String) {
+    // Construct the Bearer token
     let bearer_hdr = format!("Bearer {}", token);
+    println!("Authorization Header: {}", bearer_hdr); // Debugging the token
 
+    // Build the GET request
     let request = client
-        .get(uri.clone()) // Clone because uri is needed later
-        .header("Authorization", bearer_hdr)
+        .get(&uri)
+        
         .header("accept", "application/json")
-        .header("User-Agent", "Mozilla/5.0")
+        .header("Authorization", &bearer_hdr)
         .build();
 
+    // Debug the request
+    println!("{:#?}", request);
+
+    // Execute the request and handle the response
     match request {
-        Ok(req) => {
-            match client.execute(req).await {
-                Ok(resp) => {
-                    println!(
-                        "Request {}, URL: {}, Status: {}",
-                        id, uri, resp.status()
-                    );
-                    println!("{:#?}", resp);
-                }
-                Err(e) => {
-                    eprintln!("Error in request {}: {}", id, e);
-                }
+        Ok(req) => match client.execute(req).await {
+            Ok(resp) => {
+                println!(
+                    "Request {}, URL: {}, Status: {}, Response: {:?}",
+                    id,
+                    uri,
+                    resp.status(),
+                    resp.text().await.unwrap_or_else(|_| "Failed to read response text".to_string())
+                );
             }
-        }
+            Err(e) => {
+                eprintln!("Error in request {}: {}", id, e);
+            }
+        },
         Err(e) => {
             eprintln!("Error creating request {}: {}", id, e);
         }
     }
 }
+
 
 async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: String, token: String) {
     let mut tasks = vec![];
@@ -96,15 +107,13 @@ async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri:
 async fn main() {
     // Start measuring time
     let start = Instant::now();
-    let auth_token = fs::read_to_string(".token")
-        .expect("Missing .token file for auth");
 
     // Parse CLI arguments using clap
     let args = Args::parse();
     
 
     // Execute the request sending process
-    send_concurrent_requests(args.total_requests, args.batch_size, args.url, auth_token).await;
+    send_concurrent_requests(args.total_requests, args.batch_size, args.url, args.token).await;
 
     // Measure total elapsed time and print it
     let duration = start.elapsed();
