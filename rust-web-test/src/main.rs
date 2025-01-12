@@ -1,6 +1,5 @@
 use clap::Parser;
 use std::fs;
-use rand::Rng;
 use reqwest::Client;
 use std::time::{Duration, Instant};
 
