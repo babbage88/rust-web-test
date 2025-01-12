@@ -1,5 +1,7 @@
 use clap::Parser;
 use reqwest::Client;
+use colored::Colorize;
+use serde_json::Value;
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
@@ -42,13 +44,33 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
     match request {
         Ok(req) => match client.execute(req).await {
             Ok(resp) => {
+                let status = resp.status();
+                let status_text = if status == 200 {
+                    format!("{}", status).green().bold()
+                } else {
+                    format!("{}", status).red().bold()
+                };
+                let response_text = match resp.text().await {
+                    Ok(text) => {
+                        // Try to parse and pretty-print the response as JSON
+                        match serde_json::from_str::<Value>(&text) {
+                            Ok(json) => serde_json::to_string_pretty(&json).unwrap_or_else(|_| text),
+                            Err(_) => text, // Fallback to plain text if not valid JSON
+                        }
+                    }
+                    Err(_) => "Failed to read response text".to_string(),
+                };
+
                 println!(
-                    "Request {}, URL: {}, Status: {}, Response: {:?}",
+                    "Request {}, URL: {}, Status: {}",
                     id,
-                    uri,
-                    resp.status(),
-                    resp.text().await.unwrap_or_else(|_| "Failed to read response text".to_string())
+                    uri.blue().bold(),
+                    status_text
                 );
+                println!("Response:");
+                for line in response_text.lines() {
+                    println!("{}", line);
+                }
             }
             Err(e) => {
                 eprintln!("Error in request {}: {}", id, e);
