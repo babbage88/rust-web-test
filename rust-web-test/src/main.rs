@@ -4,36 +4,24 @@ use rand::Rng;
 use reqwest::Client;
 use std::time::{Duration, Instant};
 
-/// Simple program to send concurrent GET requests with random parameters
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Total number of requests to send (positional)
+    /// Target URL to send requests to (required positional argument)
+    #[arg(value_name = "URL")]
+    url: String,
+
+    /// Total number of requests to send (optional positional argument with default)
     #[arg(value_name = "TOTAL_REQUESTS", default_value_t = 5000)]
     total_requests: usize,
 
-    /// Number of requests to send in each batch (positional)
+    /// Number of requests to send in each batch (optional positional argument with default)
     #[arg(value_name = "BATCH_SIZE", default_value_t = 1000)]
     batch_size: usize,
-
-    /// Target URL to send requests to
-    #[arg(value_name = "URL")]
-    url: String,
-}
-// Function to generate a random float between `min` and `max`
-fn random_float(min: f64, max: f64) -> f64 {
-    let mut rng = rand::thread_rng();
-    rng.gen_range(min..max)
-}
-
-// Function to generate a random integer between `min` and `max`
-fn random_int(min: u32, max: u32) -> u32 {
-    let mut rng = rand::thread_rng();
-    rng.gen_range(min..=max)
 }
 
 async fn send_get_request(client: &Client, id: usize, uri: String, token: String) {
-    let mut bearer_hdr = format!("Bearer {}", token);
+    let bearer_hdr = format!("Bearer {}", token);
 
     let request = client
         .get(uri.clone()) // Clone because uri is needed later
