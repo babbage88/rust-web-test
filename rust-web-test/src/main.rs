@@ -1,10 +1,13 @@
 use clap::{ArgAction, Parser};
-use reqwest::Client;
 use colored::Colorize;
+use reqwest::blocking::Client as BlockingClient;
+use reqwest::Client;
 use std::time::{Duration, Instant};
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[derive(Parser)]
+#[command(name = "rust-web-test")]
+#[command(version = "1.0")]
+#[command(about = "Send batches of http/https requests to specified url for testing capacity", long_about = None)]
 struct Args {
     /// Target URL to send requests to (Positional Argument)
     #[arg(value_name = "URL", index = 1)]
@@ -15,24 +18,19 @@ struct Args {
     token: Option<String>,
 
     /// Flag to send requests without authentication (Keyword Argument)
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(long, short, action = ArgAction::SetTrue)]
     unauthenticated: bool,
 
-    /// Positional argument for total number of requests
-    #[arg(value_name = "TOTAL_REQUESTS", index = 3)]
-    total_requests_positional: Option<usize>,
-
-    /// Positional argument for batch size
-    #[arg(value_name = "BATCH_SIZE", index = 4)]
-    batch_size_positional: Option<usize>,
+    #[arg(long, short, action = ArgAction::SetTrue)]
+    synchronous: bool,
 
     /// Flag-based total requests
-    #[arg(long = "total-requests")]
-    total_requests_flag: Option<usize>,
+    #[arg(long, short, value_name = "TOTAL_REQUESTS")]
+    total_requests: Option<usize>,
 
     /// Flag-based batch size
-    #[arg(long = "batch-size")]
-    batch_size_flag: Option<usize>,
+    #[arg(long, short, value_name = "BATCH")]
+    batch_size: Option<usize>,
 }
 
 async fn send_get_request(client: &Client, id: usize, uri: String, token: Option<String>) {
@@ -69,7 +67,46 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: Option
     }
 }
 
-async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: String, token: Option<String>) {
+fn send_requests_synchronously(total_requests: usize, uri: String, token: Option<String>) {
+    let client = BlockingClient::new();
+
+    for id in 0..total_requests {
+        let mut request = client.get(&uri).header("accept", "application/json");
+
+        if let Some(ref token) = token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        match request.send() {
+            Ok(resp) => {
+                let status = resp.status();
+                let status_text = if status == 200 {
+                    format!("{}", status).green().bold()
+                } else {
+                    format!("{}", status).red().bold()
+                };
+
+                println!(
+                    "Request {}, URL: {}, Status: {}",
+                    id.to_string().yellow().bold(),
+                    uri.blue().bold(),
+                    status_text
+                );
+            }
+            Err(e) => {
+                eprintln!("Error in request {}: {}", id, e);
+            }
+        }
+    }
+}
+
+async fn send_batch(
+    client: &Client,
+    start_id: usize,
+    num_requests: usize,
+    uri: String,
+    token: Option<String>,
+) {
     let mut tasks = vec![];
 
     for i in 0..num_requests {
@@ -87,7 +124,12 @@ async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: 
     }
 }
 
-async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri: String, token: Option<String>) {
+async fn send_concurrent_requests(
+    total_requests: usize,
+    batch_size: usize,
+    uri: String,
+    token: Option<String>,
+) {
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(5000)
@@ -100,9 +142,20 @@ async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri:
     for batch in 0..num_batches {
         let start_id = batch * batch_size;
         let requests_in_batch = std::cmp::min(batch_size, total_requests - start_id);
-        println!("Starting batch {} with {} requests...", batch + 1, requests_in_batch);
+        println!(
+            "Starting batch {} with {} requests...",
+            batch + 1,
+            requests_in_batch
+        );
 
-        send_batch(&client, start_id, requests_in_batch, uri.clone(), token.clone()).await;
+        send_batch(
+            &client,
+            start_id,
+            requests_in_batch,
+            uri.clone(),
+            token.clone(),
+        )
+        .await;
         total_sent += requests_in_batch;
 
         println!("Batch {} completed.", batch + 1);
@@ -111,20 +164,32 @@ async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri:
     println!("Total requests sent: {}", total_sent);
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
-async fn main() {
+//#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
+fn main() {
     let start = Instant::now();
     let args = Args::parse();
+    let total_requests = args.total_requests.or(args.total_requests).unwrap_or(10);
+    let batch_size = args.batch_size.or(args.total_requests).unwrap_or(10);
+    let token = if args.unauthenticated {
+        None
+    } else {
+        args.token
+    };
 
-    // Resolve total_requests: Prefer the flag if provided, otherwise use positional, fallback to default
-    let total_requests = args.total_requests_flag.or(args.total_requests_positional).unwrap_or(10);
-    
-    // Resolve batch_size: Prefer the flag if provided, otherwise use positional, fallback to default
-    let batch_size = args.batch_size_flag.or(args.batch_size_positional).unwrap_or(2);
-
-    let token = if args.unauthenticated { None } else { args.token };
-
-    send_concurrent_requests(total_requests, batch_size, args.url, token).await;
+    if args.synchronous {
+        println!("{}", "Starting single-threaded mode...".yellow());
+        send_requests_synchronously(total_requests, args.url, token);
+    } else {
+        println!("{}", "Starting async mode...".cyan());
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(send_concurrent_requests(
+                total_requests,
+                batch_size,
+                args.url,
+                token,
+            ));
+    }
 
     let duration = start.elapsed();
     println!(
@@ -133,3 +198,12 @@ async fn main() {
     );
 }
 
+/*
+if args.single_threaded {
+    println!("Starting single threaded");
+    send_requests_synchronously(total_requests, args.url, token);
+} else {
+    println!("Starting async");
+    send_concurrent_requests(total_requests, batch_size, args.url, token).await;
+}
+*/
