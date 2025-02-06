@@ -1,43 +1,48 @@
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use reqwest::Client;
 use colored::Colorize;
-//use serde_json::Value;
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Target URL to send requests to (required positional argument)
-    #[arg(value_name = "URL")]
+    /// Target URL to send requests to (Positional Argument)
+    #[arg(value_name = "URL", index = 1)]
     url: String,
 
-    /// Bearer Auth token for protected routes
-    #[arg(value_name = "TOKEN")]
-    token: String,
+    /// Bearer Auth token for protected routes (Optional Positional Argument)
+    #[arg(value_name = "TOKEN", index = 2)]
+    token: Option<String>,
 
-    /// Total number of requests to send (optional positional argument with default)
-    #[arg(value_name = "TOTAL_REQUESTS", default_value_t = 5000)]
-    total_requests: usize,
+    /// Flag to send requests without authentication (Keyword Argument)
+    #[arg(long, action = ArgAction::SetTrue)]
+    unauthenticated: bool,
 
-    /// Number of requests to send in each batch (optional positional argument with default)
-    #[arg(value_name = "BATCH_SIZE", default_value_t = 1000)]
-    batch_size: usize,
+    /// Positional argument for total number of requests
+    #[arg(value_name = "TOTAL_REQUESTS", index = 3)]
+    total_requests_positional: Option<usize>,
+
+    /// Positional argument for batch size
+    #[arg(value_name = "BATCH_SIZE", index = 4)]
+    batch_size_positional: Option<usize>,
+
+    /// Flag-based total requests
+    #[arg(long = "total-requests")]
+    total_requests_flag: Option<usize>,
+
+    /// Flag-based batch size
+    #[arg(long = "batch-size")]
+    batch_size_flag: Option<usize>,
 }
 
-async fn send_get_request(client: &Client, id: usize, uri: String, token: String) {
-    // Construct the Bearer token
-    let bearer_hdr = format!("Bearer {}", token);
+async fn send_get_request(client: &Client, id: usize, uri: String, token: Option<String>) {
+    let mut request = client.get(&uri).header("accept", "application/json");
 
-    // Build the GET request
-    let request = client
-        .get(&uri)
-        
-        .header("accept", "application/json")
-        .header("Authorization", &bearer_hdr)
-        .build();
+    if let Some(token) = token {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
 
-    // Execute the request and handle the response
-    match request {
+    match request.build() {
         Ok(req) => match client.execute(req).await {
             Ok(resp) => {
                 let status = resp.status();
@@ -46,16 +51,6 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
                 } else {
                     format!("{}", status).red().bold()
                 };
-                //let response_text = match resp.text().await {
-                //    Ok(text) => {
-                //        // Try to parse and pretty-print the response as JSON
-                //        match serde_json::from_str::<Value>(&text) {
-                //            Ok(json) => serde_json::to_string_pretty(&json).unwrap_or_else(|_| text),
-                //            Err(_) => text, // Fallback to plain text if not valid JSON
-                //        }
-                //    }
-                //    Err(_) => "Failed to read response text".to_string(),
-                //};
 
                 println!(
                     "Request {}, URL: {}, Status: {}",
@@ -63,10 +58,6 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
                     uri.blue().bold(),
                     status_text
                 );
-                //println!("  :");
-                //for line in response_text.lines() {
-                //    println!("{}", line);
-                //}
             }
             Err(e) => {
                 eprintln!("Error in request {}: {}", id, e);
@@ -78,14 +69,13 @@ async fn send_get_request(client: &Client, id: usize, uri: String, token: String
     }
 }
 
-
-async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: String, token: String) {
+async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: String, token: Option<String>) {
     let mut tasks = vec![];
 
     for i in 0..num_requests {
         let client_ref = client.clone();
-        let uri_clone = uri.clone(); // Clone the URI for each task
-        let token_clone = token.clone(); // Clone the token for each task
+        let uri_clone = uri.clone();
+        let token_clone = token.clone();
         let task = tokio::spawn(async move {
             send_get_request(&client_ref, start_id + i, uri_clone, token_clone).await;
         });
@@ -97,10 +87,10 @@ async fn send_batch(client: &Client, start_id: usize, num_requests: usize, uri: 
     }
 }
 
-async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri: String, token: String) {
+async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri: String, token: Option<String>) {
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
-        .pool_max_idle_per_host(5000)  // Increase the connection pool size
+        .pool_max_idle_per_host(5000)
         .build()
         .unwrap();
 
@@ -123,20 +113,23 @@ async fn send_concurrent_requests(total_requests: usize, batch_size: usize, uri:
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
-    // Start measuring time
     let start = Instant::now();
-
-    // Parse CLI arguments using clap
     let args = Args::parse();
+
+    // Resolve total_requests: Prefer the flag if provided, otherwise use positional, fallback to default
+    let total_requests = args.total_requests_flag.or(args.total_requests_positional).unwrap_or(10);
     
+    // Resolve batch_size: Prefer the flag if provided, otherwise use positional, fallback to default
+    let batch_size = args.batch_size_flag.or(args.batch_size_positional).unwrap_or(2);
 
-    // Execute the request sending process
-    send_concurrent_requests(args.total_requests, args.batch_size, args.url, args.token).await;
+    let token = if args.unauthenticated { None } else { args.token };
 
-    // Measure total elapsed time and print it
+    send_concurrent_requests(total_requests, batch_size, args.url, token).await;
+
     let duration = start.elapsed();
     println!(
         "All requests completed. Total time: {:.2?} for {} requests",
-        duration, args.total_requests
+        duration, total_requests
     );
 }
+
