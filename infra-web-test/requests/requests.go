@@ -1,10 +1,13 @@
 package requests
 
 import (
+	"bytes"
+	"io"
 	"log"
 	"log/slog"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,13 +19,13 @@ type AuthenticatedClient struct {
 	Error   error         `json:"error"`
 }
 
-func NewAuthenticatedClientRequest(authKey string, uri string, method string, timeoutSec int) AuthenticatedClient {
+func NewAuthenticatedClientRequest(authKey, uri, method string, timeoutSec int, reqBody io.Reader) AuthenticatedClient {
 	var authenticatedClientReq AuthenticatedClient
 	var authHdrBearer strings.Builder
 	authHdrBearer.WriteString("Bearer ")
 	authHdrBearer.WriteString(authKey)
 	c := http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-	req, err := http.NewRequest(method, uri, nil)
+	req, err := http.NewRequest(method, uri, reqBody)
 	if err != nil {
 		slog.Error("error initializing request", slog.String("error", err.Error()))
 		authenticatedClientReq.Error = err
@@ -61,8 +64,8 @@ func sendRequest(cr AuthenticatedClient, id int, wg *sync.WaitGroup) {
 }
 
 // sendBatch sends a batch of requests with the specified number of concurrent requests
-func sendBatch(startID, numRequests, timeoutSec int, authKey, uri, method string, wg *sync.WaitGroup) {
-	clientReq := NewAuthenticatedClientRequest(authKey, uri, method, timeoutSec)
+func sendBatch(startID, numRequests, timeoutSec int, authKey, uri, method string, body io.Reader, wg *sync.WaitGroup) {
+	clientReq := NewAuthenticatedClientRequest(authKey, uri, method, timeoutSec, body)
 	var batchWG sync.WaitGroup
 	for i := 0; i < numRequests; i++ {
 		batchWG.Add(1)
@@ -73,18 +76,38 @@ func sendBatch(startID, numRequests, timeoutSec int, authKey, uri, method string
 }
 
 // sendConcurrentRequests breaks requests into batches and sends them 1000 at a time
-func sendConcurrentRequests(totalRequests, timeoutSec, batchSize int, uri, authKey, method string) {
+func sendConcurrentRequests(totalRequests, timeoutSec, batchSize int, uri, authKey, method, reqBodyPath string) {
 	var wg sync.WaitGroup
+	reqBody, err := parseRequestBody(reqBodyPath)
+	if err != nil {
+		log.Printf("error parsing request body %s", err.Error())
+	}
 	numBatches := (totalRequests + batchSize - 1) / batchSize // Calculate number of batches
 
 	for batch := 0; batch < numBatches; batch++ {
 		wg.Add(1)
 		startID := batch * batchSize
 		requestsInBatch := min(batchSize, totalRequests-startID)
-		go sendBatch(startID, requestsInBatch, timeoutSec, authKey, uri, method, &wg)
+		go sendBatch(startID, requestsInBatch, timeoutSec, authKey, uri, method, reqBody, &wg)
 		wg.Wait() // Wait for the current batch to finish before starting the next
 	}
 	wg.Wait() // Ensure all batches are completed
+}
+
+func parseRequestBody(path string) (io.Reader, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatalf("error opening file. file: %s error: %s", path, err.Error())
+		return nil, err
+	}
+	defer file.Close()
+
+	byteVal, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("error reading file. file: %s error: %s", path, err.Error())
+		return nil, err
+	}
+	return bytes.NewBuffer(byteVal), err
 }
 
 // min function to get the minimum value
