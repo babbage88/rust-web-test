@@ -53,6 +53,39 @@ func sendRequest(client *http.Client, id int, wg *sync.WaitGroup) {
 		id, initAmount, monthlyContribution, interestRate, numberOfYears, resp.Status)
 }
 
+func sendCalcRequest(client *http.Client, id int, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// Generate random values for parameters
+	initAmount := randomInt(500, 100000)
+	monthlyContribution := randomInt(50, 5000)
+	interestRate := fmt.Sprintf("%.2f", randomFloat(0.1, 200))
+	numberOfYears := randomInt(1, 50)
+
+	// Build the request URL
+	url := fmt.Sprintf("https://calc.test.trahan.dev/calculated?initAmount=%d&monthlyContribution=%d&interestRate=%s&numberOfYears=%d",
+		initAmount, monthlyContribution, interestRate, numberOfYears)
+
+	// Create the request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("Error creating request %d: %v", id, err)
+		return
+	}
+
+	// Send the request
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error in request %d: %v", id, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Log the request details
+	log.Printf("Request %d - initAmount: %d, monthlyContribution: %d, interestRate: %s, numberOfYears: %d, Status: %s\n",
+		id, initAmount, monthlyContribution, interestRate, numberOfYears, resp.Status)
+}
+
 // sendBatch sends a batch of requests with the specified number of concurrent requests
 func sendBatch(startID, numRequests int, wg *sync.WaitGroup) {
 	client := &http.Client{
